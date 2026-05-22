@@ -17,15 +17,20 @@ services:
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: 10080
       - key: MONGODB_URI
+        value: "PLACEHOLDER_CHANGE_ME"
       - key: GEMINI_API_KEY
+        value: "PLACEHOLDER_CHANGE_ME"
       - key: QDRANT_HOST
+        value: "PLACEHOLDER_CHANGE_ME"
       - key: QDRANT_PORT
-        value: 6333
+        value: "6333"
       - key: QDRANT_API_KEY
+        value: "PLACEHOLDER_CHANGE_ME"
       - key: LANGCHAIN_TRACING_V2
         value: "true"
       - key: LANGSMITH_ENDPOINT
         value: "https://api.smith.langchain.com"
       - key: LANGSMITH_API_KEY
+        value: "PLACEHOLDER_CHANGE_ME"
       - key: LANGSMITH_PROJECT
         value: "LangGraph_Chatbot_tracing"
