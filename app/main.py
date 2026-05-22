@@ -63,6 +63,10 @@ if settings.BACKEND_CORS_ORIGINS:
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": settings.PROJECT_NAME}
+
 # Mount React static files (JS, CSS, index.html)
 base_dir = os.path.dirname(os.path.dirname(__file__))
 frontend_dist = os.path.join(base_dir, "frontend", "dist")

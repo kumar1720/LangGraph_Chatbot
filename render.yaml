@@ -6,7 +6,7 @@ services:
     plan: free
     region: oregon
     numInstances: 1
-    healthCheckPath: /api/v1/history/chats
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: 10000
