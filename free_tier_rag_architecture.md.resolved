@@ -1,0 +1,807 @@
+# 🚀 Free-Tier Deployment & Multi-Tenant RAG Architecture Plan
+
+This document outlines a thorough analysis of the FastAPI-LangGraph Chatbot codebase, identifies all paid or deployment-restricting components, provides a curated 100% free-tier replacement list using **Google Gemini**, **MongoDB**, and **Qdrant Cloud**, and explains how to implement a fully secured, multi-tenant RAG (Retrieval-Augmented Generation) system.
+
+---
+
+## 🔍 Detailed Codebase & Deployment Analysis
+
+To deploy your unified chatbot frontend and backend as a **single consolidated server on Render (Free Tier)**, we must address several severe limitations and configuration requirements:
+
+1. **Ephemeral File System (Render Free Tier):**
+   * **The Issue:** The backend currently uses SQLite (`sqlite:///./app.db`). Under Render's free tier, standard disks are ephemeral. Every time the server sleeps due to 15 minutes of inactivity, or redeploys, your entire database (registered users, tenant settings, and chat relations) will be deleted.
+   * **Vector Store Client:** Standard Qdrant runs locally (`localhost:6333`). This is impossible to maintain on Render without paying for a dedicated Docker instance or persistent storage.
+2. **WebRTC & Network Restrictions (Render Free Tier):**
+   * **The Issue:** The `livekit_agent.py` establishes a persistent WebRTC agent connection using PyTorch (Silero VAD) and third-party WebRTC channels. Render free-tier services only expose single HTTP ports (80/443). They do not support custom UDP/TCP routing required for WebRTC. Furthermore, PyTorch-based VAD consumes >512MB RAM, causing the Render container to crash with Out-Of-Memory (OOM) errors.
+3. **High Operational Costs (Paid APIs):**
+   * **The Issue:** The current codebase is heavily locked into **OpenAI (GPT-4o-mini & Text-Embedding-3-small)**, **Tavily (Search)**, **Firecrawl (Scraping)**, **Deepgram (STT)**, and **Cartesia (TTS)**. These require paid subscriptions or have extremely restrictive trial limits.
+
+---
+
+## 📋 The 100% Free-Tier Replacement List
+
+Here is the exact replacement matrix that guarantees **100% free operation**, high performance, and smooth, single-server Render compatibility:
+
+| Current Component | Free-Tier Replacement | Description & Free Limits |
+| :--- | :--- | :--- |
+| **LLM Orchestration** | **Google Gemini 2.5 Flash / 1.5 Flash** (via Google AI Studio) | Extremely generous free tier: **15 RPM / 1,500 RPD / 1M TPM**. State-of-the-art reasoning and large context window. |
+| **Embeddings** | **Gemini Embeddings (`text-embedding-004`)** | Fully free to generate high-quality 768-dimension vector embeddings using your Google AI Studio API key. |
+| **Vector Store** | **Qdrant Cloud Free Tier** | Provides **1 free cluster** (1GB RAM, 0.5 CPU, up to 4M vectors) which is fully persistent and cloud-hosted. |
+| **Main Database & Chat Sessions** | **MongoDB Atlas M0 Free Tier** | Cloud-hosted MongoDB offering **512 MB of persistent storage** forever. Perfect for users, tenants, and sessions. |
+| **Web Search Tool** | **DuckDuckGo Search** (via LangChain Community) | **100% free**, no signup required, no rate limit issues for general search tasks. |
+| **Web Scraper Tool** | **BeautifulSoup4 + HTTP Client** (Custom tool) | Runs directly in the Render container for **unlimited free scraping** of public webpages. |
+| **Voice Mode (STT/TTS)** | **Client-Side Web Speech API** (STT/TTS in Browser) | Implemented directly in React. Offloads **100%** of audio processing, speech-to-text, and text-to-speech to the browser engine. Zero server load. |
+| **Session Memory** | **Open-source Mem0 library configured with Google Gemini API** | Uses the free `mem0ai` library configured with Gemini 1.5 Flash (LLM) and `text-embedding-004` (Embedder) connecting to your free Qdrant Cloud. |
+
+---
+
+## 🏗️ Adding the Multi-Tenant RAG Architecture
+
+To implement a secure, multi-tenant RAG (Document QA) system, we will:
+1. Allow users to upload a comprehensive set of documents, media, and data formats via the React frontend:
+   * **Documents:** PDF (`.pdf`), Word Document (`.docx`), Old Word (`.doc`), Markdown (`.md`), Plain Text (`.txt`)
+   * **Structured Data:** CSV (`.csv`), Excel (`.xlsx`), Old Excel (`.xls`), JSON (`.json`), XML (`.xml`)
+   * **Presentations:** PowerPoint (`.pptx`), Old PowerPoint (`.ppt`)
+   * **Web & Scraping:** HTML (`.html`), Web URLs (web scraping)
+   * **Images (OCR):** PNG (`.png`), JPG/JPEG (`.jpg`, `.jpeg`) for text extraction
+   * **Audio (Transcripts):** MP3, WAV, etc., processed via speech models (Whisper/Client STT)
+   * **Archives:** Compressed directories (`.zip`) containing any of the supported formats
+2. Store files securely, extract text, and segment it into manageable chunks.
+3. Embed chunks with tenant isolation (`tenant_id` and `user_id` payload filters) and store them in the Qdrant Cloud vector database.
+4. Retrieve relevant contexts on-demand using payload filters during the LangGraph execution flow.
+
+### 🔄 Multi-Tenant RAG Data Flow (Ingestion & Retrieval)
+
+This sequence diagram outlines the isolated data paths for both document ingestion (Phase 1) and secure context-stuffed query execution (Phase 2):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User App (React)
+    participant API as FastAPI Backend
+    participant Gemini as Gemini API (AI Studio)
+    participant Qdrant as Qdrant Cloud (Free Tier)
+    participant DB as MongoDB Atlas
+
+    note over User, DB: PHASE 1: DOCUMENT INGESTION FLOW (RAG)
+    User->>API: Upload File (PDF/DOCX/TXT/CSV/XLSX/PPTX/HTML/MD/JSON/Images/Audio/Zip) + JWT Token
+    API->>API: JWT Middleware extracts tenant_id & user_id
+    API->>API: Extract raw text content (PdfReader / UTF-8)
+    API->>API: Split content into chunks (1000 chars, 200 overlap)
+    API->>Gemini: Request Embeddings for chunks (text-embedding-004)
+    Gemini-->>API: Return 768-dimension vectors
+    API->>Qdrant: Store vectors with metadata (tenant_id, user_id, filename)
+    Qdrant-->>API: Confirm storage (payload filtered collection)
+    API-->>User: Ingestion Completed successfully (200 OK)
+
+    note over User, DB: PHASE 2: CHAT & CONTEXT-AWARE RETRIEVAL FLOW
+    User->>API: Ask Question ("Based on my documents...") + JWT
+    API->>API: JWT Middleware extracts tenant_id & user_id
+    API->>Gemini: Request Embedding for Query (text-embedding-004)
+    Gemini-->>API: Return query vector
+    API->>Qdrant: Query vector with strict Payload Filter (tenant_id & user_id)
+    Qdrant-->>API: Return top K isolated relevant document chunks
+    API->>API: Stuff document chunks into LangGraph System Prompt
+    API->>API: Load cross-chat context from Mem0 Memory
+    API->>Gemini: Invoke LLM with complete context (Gemini 1.5 Flash)
+    Gemini-->>API: Stream completion tokens
+    API->>DB: Persist conversation history & session state
+    API-->>User: Stream final response via SSE (text/event-stream)
+```
+
+### Complete System Architecture Diagram
+
+
+```mermaid
+graph TB
+    %% Styling definitions for maximum high-contrast visibility
+    classDef client fill:#0288d1,stroke:#01579b,stroke-width:2px,color:#fff;
+    classDef api fill:#388e3c,stroke:#1b5e20,stroke-width:2px,color:#fff;
+    classDef orchestrator fill:#f57c00,stroke:#e65100,stroke-width:2px,color:#fff;
+    classDef mcp fill:#7b1fa2,stroke:#4a148c,stroke-width:2px,color:#fff;
+    classDef storage fill:#455a64,stroke:#263238,stroke-width:2px,color:#fff;
+
+    %% 1. Client / Frontend Layer
+    subgraph ClientLayer["1. Client / Frontend Layer (Unified Render Server)"]
+        UI["React Material UI Interface<br/>(Served as Static Files)"]
+        Speech["Browser Web Speech API<br/>(Client-Side Speech-to-Text & TTS)"]
+        UploadUI["Document Upload Panel<br/>(Multi-Format Ingestion)"]
+    end
+    class UI,Speech,UploadUI client;
+
+    %% 2. API Gateway & Routing Layer
+    subgraph APILayer["2. API Gateway Layer (FastAPI Backend - Render Hosted)"]
+        AuthRouter["Auth Router<br/>(/api/v1/auth)"]
+        ChatRouter["Chat Router<br/>(/api/v1/chat/completions)"]
+        DocRouter["Documents Router<br/>(/api/v1/documents/upload)"]
+        JWT["JWT Auth Middleware<br/>(Extracts user_id & tenant_id)"]
+    end
+    class AuthRouter,ChatRouter,DocRouter,JWT api;
+
+    %% 3. AI Logic & State Orchestration Layer
+    subgraph EngineLayer["3. LangGraph Orchestrator & Agents State Machine"]
+        AISupport["AISupport Orchestrator<br/>(app/agent/chat_agent.py)"]
+        Supervisor["Supervisor Agent<br/>(Routes tasks / Generates response)"]
+        Researcher["Researcher Agent<br/>(Internet lookup task specialist)"]
+        Scrapper["Scraper Agent<br/>(Webpage content extraction specialist)"]
+        GraphState["LangGraph Compiled State<br/>(Maintains conversation state)"]
+    end
+    class AISupport,Supervisor,Researcher,Scrapper,GraphState orchestrator;
+
+    %% 4. External Services & Tool Adapters (FastMCP)
+    subgraph ToolLayer["4. FastMCP Tool Servers & External AI Engines"]
+        SearchServer["FastMCP Search Server<br/>(Port 7861 - DuckDuckGo / SSE)"]
+        ScrapingServer["FastMCP Scraping Server<br/>(Port 7860 - BeautifulSoup / SSE)"]
+        GeminiLLM["Google Gemini API<br/>(Gemini 1.5 Flash - Free Tier)"]
+        GeminiEmbed["Google Gemini Embeddings<br/>(text-embedding-004)"]
+    end
+    class SearchServer,ScrapingServer,GeminiLLM,GeminiEmbed mcp;
+
+    %% 5. Persistence & Multi-Tenant Retrieval Layer
+    subgraph StorageLayer["5. Storage & Retrieval Layer (100% Free & Persistent)"]
+        Mongo["MongoDB Atlas (M0 Free)<br/>(Users, Chat metadata, Sessions)"]
+        QdrantCloud["Qdrant Cloud (Free Cluster)<br/>(Isolated Collections)"]
+        Mem0["Mem0 Memory Service<br/>(Cross-chat personalization)"]
+        RAGdocs["RAG Collection<br/>(Isolated chunks by tenant_id)"]
+    end
+    class Mongo,QdrantCloud,Mem0,RAGdocs storage;
+
+    %% --- INTERACTION FLOWS ---
+    
+    %% Client Interactions
+    UI -->|1. JWT Login / Sign Up| AuthRouter
+    UI -->|2. Stream Chat Query| ChatRouter
+    UploadUI -->|3. Upload File| DocRouter
+    Speech <-->|Real-Time Vocal Input/Output| UI
+    
+    %% API to Middleware & DB
+    AuthRouter & ChatRouter & DocRouter --> JWT
+    JWT -->|Verify & Fetch User Details| Mongo
+    
+    %% Ingestion Pipeline (RAG)
+    DocRouter -->|4. Parse File to Text & Chunk| DocRouter
+    DocRouter -->|5. Generate Embeddings| GeminiEmbed
+    GeminiEmbed -->|6. Store Vector + Payload Filter| RAGdocs
+    RAGdocs -.->|Strict Multi-Tenant Isolation| QdrantCloud
+    
+    %% Chat Execution Pipeline
+    ChatRouter -->|7. Forward Request| AISupport
+    AISupport -->|8. Fetch Context by tenant_id & user_id| RAGdocs
+    AISupport -->|9. Query Memory| Mem0
+    Mem0 -.->|Load/Store Facts| QdrantCloud
+    
+    %% LangGraph Execution
+    AISupport -->|10. Execute Graph| GraphState
+    GraphState -->|Orchestrate workflow| Supervisor
+    Supervisor -->|Delegate Search| Researcher
+    Supervisor -->|Delegate Scraping| Scrapper
+    
+    %% Agent Tool Execution via FastMCP
+    Researcher -->|Call Tool| SearchServer
+    Scrapper -->|Call Tool| ScrapingServer
+    
+    %% LLM Execution
+    Supervisor & Researcher & Scrapper -->|Invoke Model with contexts| GeminiLLM
+    
+    %% Output Flow
+    AISupport -->|11. Store Session Record| Mongo
+    AISupport -->|12. Save New Facts| Mem0
+    AISupport -->|13. Stream Final Token Response| ChatRouter
+    ChatRouter -->|14. Chunk SSE Stream| UI
+```
+
+### 🔍 Architectural Analysis & Detailed Data Flow
+
+The updated multi-tenant chatbot architecture is separated into five specialized layers. Each is designed to ensure strict tenant isolation, 100% free-tier operation, and high-performance execution without server constraints:
+
+1. **Client / Frontend Layer (Unified Render Server):**
+   * **UI Panel (`UI`):** A responsive React web application built with Material UI. The frontend code is compiled into static assets and hosted directly inside the same FastAPI Render server. It connects to the backend endpoints locally on the same port, resolving all CORS configurations and network latency.
+   * **Web Speech Interface (`Speech`):** The client-side Browser Web Speech API acts as a free, native voice engine. Speech-to-Text (STT) is handled locally via the browser's transcription engine (`webkitSpeechRecognition`), and responses are spoken back via Text-to-Speech (`speechSynthesis`). This eliminates all WebRTC connection costs, Cartesia/Deepgram API keys, and server-side GPU/VAD loads.
+   * **Document Upload Panel (`UploadUI`):** Allows authorized users to upload a comprehensive set of documents, media, and data formats for isolated vector ingestion.
+
+2. **API Gateway & Routing Layer (FastAPI Backend):**
+   * **Auth Router (`AuthRouter`):** Manages user registration, JWT token generation, and secure logins.
+   * **Chat Router (`ChatRouter`):** Handles chat completions requests and handles Server-Sent Events (SSE) to stream chunks of text back to the client.
+   * **Documents Router (`DocRouter`):** Receives raw document file uploads, extracts text asynchronously using `PdfReader`, splits the text into chunks of 1000 characters (200 overlap), and generates vectors.
+   * **JWT Middleware (`JWT`):** Intercepts all secure API requests, decodes the JWT bearer token, and extracts the caller's unique `user_id` and corporate `tenant_id`. It injects these attributes into every downstream service to enforce absolute data isolation.
+
+3. **AI Logic & State Orchestration Layer (LangGraph):**
+   * **AISupport Orchestrator (`AISupport`):** The core service controller. When a user asks a question, it queries the RAG document vector store and the Mem0 long-term memory to retrieve relevant factual context, compiling a secure context prompt for the agents.
+   * **Supervisor Agent (`Supervisor`):** A centralized coordinator model powered by Gemini 1.5 Flash. It acts as the routing brain, analyzing the user's intent to decide whether to answer directly, perform internet queries, or scrap specific webpages.
+   * **Researcher Agent (`Researcher`):** A specialized task node configured to execute web searches via DuckDuckGo (completely free) to fetch up-to-date facts.
+   * **Scraper Agent (`Scrapper`):** A specialized scraper node configured to retrieve raw markup and extract clean markdown content from public URLs using BeautifulSoup4.
+   * **LangGraph Compiled State (`GraphState`):** An execution graph representing the state history (conversation history, agent iterations, next steps) with checkpoints persisted securely in MongoDB Atlas.
+
+4. **External Services & Tool Adapters (FastMCP):**
+   * **FastMCP Servers (`SearchServer` & `ScrapingServer`):** Two independent, lightweight Model Context Protocol (MCP) microservices hosted on Render. They handle specialized search and scraping functions and communicate with LangGraph agents over secure SSE.
+   * **Google Gemini LLM (`GeminiLLM`):** Powered by the Gemini 1.5 Flash API via Google AI Studio. Processes developer prompts and performs advanced agent reasoning at **15 RPM / 1,500 RPD / 1M TPM** absolutely free.
+   * **Google Gemini Embeddings (`GeminiEmbed`):** Generates 768-dimension vectors using the `text-embedding-004` model free of charge.
+
+5. **Persistence & Multi-Tenant Retrieval Layer:**
+   * **MongoDB Atlas (`Mongo`):** A cloud-hosted NoSQL database storing user schemas, tenant configurations, active sessions, and LangGraph checkpoint states with strict query filtering by `tenant_id` and `user_id`.
+   * **Qdrant Cloud Free Tier Cluster (`QdrantCloud`):** A persistent, cloud-hosted vector database cluster.
+   * **RAG Collection (`RAGdocs`):** A dedicated Qdrant collection containing ingested document chunks. Isolation is maintained strictly using **Payload Filters** on the `tenant_id` and `user_id` payload fields, guaranteeing that search results are restricted strictly to the caller's account.
+   * **Mem0 Memory Service (`Mem0`):** Reconfigured to run completely free by using the open-source `mem0ai` package and generating facts via Gemini LLM/Embeddings, persisting user-specific preference history in a dedicated `general_chat_history` collection.
+
+---
+
+## 🛠️ Step-by-Step Implementation Guide
+
+### Step 1: Install Dependencies & Update Configuration
+
+1. **Install required dependencies in `requirements.txt`:**
+   ```text
+   langchain-google-genai==2.0.9
+   motor==3.3.2
+   pypdf==4.2.0
+   langchain-community==0.3.0
+   langchain-qdrant==0.2.0
+   mem0ai==0.1.28
+   ```
+
+2. **Update environment variables (`.env`):**
+   ```env
+   # MongoDB Atlas Connection URI
+   MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.abcde.mongodb.net/chatbot_db?retryWrites=true&w=majority
+   
+   # Google AI Studio (Free LLM & Embeddings)
+   GEMINI_API_KEY=AIzaSy...
+   
+   # Qdrant Cloud
+   QDRANT_HOST=your-qdrant-cloud-url.aws.qdrant.io
+   QDRANT_PORT=6333
+   QDRANT_API_KEY=your-qdrant-cloud-api-key
+   ```
+
+3. **Update Config Settings (`app/core/config.py`):**
+   ```python
+   # Replace Settings parameters in app/core/config.py
+   MONGODB_URI: str = "mongodb://localhost:27017/chatbot_db"
+   GEMINI_API_KEY: str = "********"
+   QDRANT_API_KEY: str = "********"
+   ```
+
+---
+
+### Step 2: Configure MongoDB Client (`app/db/mongodb.py`) & FastAPI Integration
+
+1. Create `app/db/mongodb.py` to establish an asynchronous connection to MongoDB Atlas using `motor`:
+
+```python
+# app/db/mongodb.py
+from motor.motor_asyncio import AsyncIOMotorClient
+from app.core.config import settings
+
+class MongoDB:
+    client: AsyncIOMotorClient = None
+    db = None
+
+    @classmethod
+    def connect_db(cls):
+        cls.client = AsyncIOMotorClient(settings.MONGODB_URI)
+        cls.db = cls.client.get_default_database()
+
+    @classmethod
+    def close_db(cls):
+        if cls.client:
+            cls.client.close()
+
+db = MongoDB()
+```
+
+2. Integrate MongoDB Atlas connection into your FastAPI lifespan (`app/main.py`):
+
+```python
+# app/main.py lifespan modification
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from app.db.mongodb import db
+from app.agent.langgraph_agent import initialize_graph, close_graph
+from app.utils.logger import setup_logger
+
+logger = setup_logger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. Initialize LangGraph compiled state graph
+    await initialize_graph()
+    
+    # 2. Establish MongoDB persistent connection
+    db.connect_db()
+    logger.info("Successfully connected to persistent MongoDB Atlas cluster")
+
+    yield
+
+    # 3. Terminate MongoDB connection on shutdown
+    db.close_db()
+    logger.info("Successfully terminated MongoDB Atlas connection")
+    
+    # 4. Clean up LangGraph session states
+    await close_graph()
+```
+
+---
+
+### Step 3: Configure Free Mem0 Memory Client (`app/agent/chat_agent.py`)
+
+Reconfigure your `mem0` client parameters to use **Google Gemini API** for both LLM and embedding generation, pointing the vector store block to your Qdrant Cloud.
+
+```python
+# Reconfiguring AISupport __init__ memory parameters in app/agent/chat_agent.py
+from mem0 import Memory
+from qdrant_client import QdrantClient
+
+client = QdrantClient(
+    url=settings.QDRANT_HOST if settings.QDRANT_HOST.startswith("http") else f"https://{settings.QDRANT_HOST}",
+    api_key=settings.QDRANT_API_KEY
+)
+
+config = {
+    "llm": {
+        "provider": "google",
+        "config": {
+            "model": "gemini-1.5-flash",
+            "temperature": 0.1,
+            "max_tokens": 2000,
+            "api_key": settings.GEMINI_API_KEY
+        }
+    },
+    "embedder": {
+        "provider": "google",
+        "config": {
+            "model": "text-embedding-004",
+            "embedding_dims": 768,
+            "api_key": settings.GEMINI_API_KEY
+        }
+    },
+    "vector_store": {
+        "provider": "qdrant",
+        "config": {
+            "collection_name": "general_chat_history",
+            "embedding_model_dims": 768,
+            "client": client
+        }
+    },
+    "custom_prompt": custom_prompt,
+    "version": "v1.1",
+}
+
+self.__memory = Memory.from_config(config)
+```
+
+---
+
+### Step 4: Configure Free Qdrant Cloud Vector Store (`app/services/vector_store.py`)
+
+We will migrate the vector store client to use Gemini Embeddings (`text-embedding-004`) and connect securely to Qdrant Cloud via HTTPS and the API key. Keep all the query scroll and formatting methods (`store_conversation`, `get_chats_by_user_id`, `get_chat_by_id`, `_ensure_collection_exists`) completely intact.
+
+Update `app/services/vector_store.py` with these modified imports and initializer:
+
+```python
+# app/services/vector_store.py modifications
+from typing import List, Dict, Any, Optional
+
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_google_genai import GoogleGenAIEmbeddings  # Swapped from OpenAI
+from qdrant_client import QdrantClient, models
+from langchain_qdrant import QdrantVectorStore
+
+from app.core.config import settings
+from app.utils.logger import setup_logger
+from app.utils.qdrant import format_chat_results
+
+logger = setup_logger(__name__)
+
+
+class MultiTenantVectorStore:
+    """A multi-tenant vector store using Qdrant for efficient semantic search with tenant isolation."""
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(MultiTenantVectorStore, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(
+        self,
+        collection_name: str = "multi_tenant_chat_history",
+        embedding: Optional[Embeddings] = None
+    ):
+        """Initialize the multi-tenant vector store pointing to Qdrant Cloud and using Gemini Embeddings."""
+        if self._initialized:
+            return
+            
+        # Establish connection to secure Qdrant Cloud Cluster
+        qdrant_url = settings.QDRANT_HOST
+        if not qdrant_url.startswith(("http://", "https://")):
+            qdrant_url = f"https://{qdrant_url}"
+            
+        self.client = QdrantClient(
+            url=qdrant_url,
+            api_key=settings.QDRANT_API_KEY
+        )
+        self.collection_name = collection_name
+        self.embedding_size = 768
+        
+        # Instantiate Gemini text-embedding-004
+        self.embedding = embedding or GoogleGenAIEmbeddings(
+            model="models/text-embedding-004",
+            google_api_key=settings.GEMINI_API_KEY
+        )
+
+        self._ensure_collection_exists()
+        self._initialized = True
+```
+
+---
+
+### Step 5: Implement RAG Service & File Upload Endpoints
+
+Create `app/services/rag_service.py` to handle document ingestion, chunking, and tenant-isolated semantic lookup:
+
+```python
+# app/services/rag_service.py
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from pypdf import PdfReader
+from io import BytesIO
+from app.services.vector_store import MultiTenantVectorStore
+from qdrant_client import models
+
+class RAGService:
+    def __init__(self, vector_store: MultiTenantVectorStore):
+        self.vector_store = vector_store
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200
+        )
+
+    def extract_text(self, file_content: bytes, filename: str) -> str:
+        if filename.endswith(".pdf"):
+            reader = PdfReader(BytesIO(file_content))
+            return "\n".join([page.extract_text() for page in reader.pages])
+        elif filename.endswith((".txt", ".md")):
+            return file_content.decode("utf-8", errors="ignore")
+        else:
+            raise ValueError("Unsupported file format. Please upload PDF, TXT, or MD.")
+
+    async def ingest_document(self, file_content: bytes, filename: str, tenant_id: str, user_id: str):
+        text = self.extract_text(file_content, filename)
+        chunks = self.text_splitter.split_text(text)
+        
+        docs = []
+        for i, chunk in enumerate(chunks):
+            docs.append(Document(
+                page_content=chunk,
+                metadata={
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "filename": filename,
+                    "chunk_id": i
+                }
+            ))
+        
+        # Add documents to Qdrant Cloud using the free embedding model
+        from langchain_qdrant import QdrantVectorStore
+        vector_db = QdrantVectorStore(
+            client=self.vector_store.client,
+            collection_name="multi_tenant_rag_docs",
+            embeddings=self.vector_store.embedding
+        )
+        vector_db.add_documents(docs)
+
+    def retrieve_context(self, query: str, tenant_id: str, user_id: str, limit: int = 4) -> str:
+        # Perform similarity search with strict payload isolation filters
+        query_vector = self.vector_store.embedding.embed_query(query)
+        
+        results = self.vector_store.client.search(
+            collection_name="multi_tenant_rag_docs",
+            query_vector=query_vector,
+            query_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="metadata.tenant_id",
+                        match=models.MatchValue(value=tenant_id)
+                    ),
+                    models.FieldCondition(
+                        key="metadata.user_id",
+                        match=models.MatchValue(value=user_id)
+                    )
+                ]
+            ),
+            limit=limit
+        )
+        
+        contexts = [hit.payload.get("page_content", "") for hit in results if hit.payload]
+        return "\n\n".join(contexts)
+```
+
+Create a new file `app/api/endpoints/documents.py` to handle uploads:
+
+```python
+# app/api/endpoints/documents.py
+from fastapi import APIRouter, UploadFile, Depends, HTTPException, status
+from typing import Annotated
+from app.api.deps import get_current_user
+from app.models.user import User
+from app.services.vector_store import MultiTenantVectorStore
+from app.services.rag_service import RAGService
+
+router = APIRouter()
+vector_store = MultiTenantVectorStore(collection_name="multi_tenant_rag_docs")
+rag_service = RAGService(vector_store)
+
+@router.post("/upload")
+async def upload_document(
+    file: UploadFile,
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    try:
+        content = await file.read()
+        await rag_service.ingest_document(
+            file_content=content,
+            filename=file.filename,
+            tenant_id=current_user.tenant_id,
+            user_id=str(current_user.id)
+        )
+        return {"status": "success", "message": f"Successfully ingested {file.filename}"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+```
+
+Register this router in `app/api/api.py`:
+```python
+# In app/api/api.py:
+from app.api.endpoints import documents
+api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
+```
+
+---
+
+### Step 6: Inject RAG Context into LangGraph
+
+Modify the LLM models to use `ChatGoogleGenerativeAI` and query the RAG service in the LangGraph conversation pipeline.
+
+1. **Swap LangGraph Agents to Gemini (`app/agent/langgraph_agent.py`):**
+   ```python
+   from langchain_google_genai import ChatGoogleGenerativeAI
+   
+   # Replace supervisor LLM
+   llm = ChatGoogleGenerativeAI(
+       model="gemini-1.5-flash", 
+       temperature=0, 
+       google_api_key=settings.GEMINI_API_KEY
+   )
+   ```
+
+2. **Incorporate Document Context Retrieval (`app/agent/chat_agent.py`):**
+   Instantiate the `RAGService` inside `AISupport` and query it during the `ask` flow:
+   ```python
+   from app.services.rag_service import RAGService
+   
+   class AISupport:
+       def __init__(self, vector_store: MultiTenantVectorStore):
+           # ... initialization
+           self.__rag_service = RAGService(vector_store)
+   
+       async def ask(self, question: str, user_id: str, chat_id: str, tenant_id: str) -> dict:
+           # 1. Search short-term memory / conversational context
+           memories = await self.__search_memory(question, user_id=user_id)
+           
+           # 2. Retrieve document context using RAG
+           document_context = self.__rag_service.retrieve_context(
+               query=question,
+               tenant_id=tenant_id,
+               user_id=user_id
+           )
+           
+           # 3. Compile full context
+           context = ""
+           if document_context:
+               context += f"Relevant information extracted from user uploaded documents:\n{document_context}\n\n"
+               
+           # Include other conversational memory contexts...
+   ```
+
+---
+
+### Step 7: High-Performance Browser Voice Assistant (Web Speech API)
+
+Since LiveKit cannot run on the free Render tier, we handle voice recognition and vocalization on the client. It takes less than 30 lines of standard Javascript code inside React and runs **100% free**.
+
+Add this voice wrapper Hook to your React codebase in `frontend/src/hooks/useVoiceAssistant.js`:
+
+```javascript
+// frontend/src/hooks/useVoiceAssistant.js
+import { useState, useEffect } from 'react';
+
+export const useVoiceAssistant = (onSpeechResult) => {
+  const [isListening, setIsListening] = useState(false);
+  const [recognition, setRecognition] = useState(null);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recog = new SpeechRecognition();
+      recog.continuous = false;
+      recog.interimResults = false;
+      recog.lang = 'en-US';
+
+      recog.onresult = (event) => {
+        const text = event.results[0][0].transcript;
+        if (onSpeechResult) onSpeechResult(text);
+        setIsListening(false);
+      };
+
+      recog.onerror = () => {
+        setIsListening(false);
+      };
+
+      recog.onend = () => {
+        setIsListening(false);
+      };
+
+      setRecognition(recog);
+    }
+  }, [onSpeechResult]);
+
+  const startListening = () => {
+    if (recognition) {
+      setIsListening(true);
+      recognition.start();
+    } else {
+      alert("Speech recognition is not supported in this browser.");
+    }
+  };
+
+  const stopListening = () => {
+    if (recognition) {
+      recognition.stop();
+      setIsListening(false);
+    }
+  };
+
+  const speak = (text) => {
+    if ('speechSynthesis' in window) {
+      // Cancel previous utterances to avoid queuing delays
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+  };
+
+  return { isListening, startListening, stopListening, speak };
+};
+```
+
+* **Frontend Usage:** 
+  In React pages, simply import the hook. When a response is received from the FastAPI chat completion endpoint, call `speak(responseText)`. Click the mic icon to activate `startListening()`, passing the transcribed text directly to the backend endpoint!
+
+---
+
+### Step 8: Deploying as a Unified Single-Server on Render
+
+To deploy both your React frontend and FastAPI backend as a single service on Render, we will build the React app into static files and configure FastAPI to serve them.
+
+#### 1. Configure FastAPI to Serve React Static Files (`app/main.py`)
+Add this configuration to your main FastAPI app entry point (`app/main.py`) to mount and serve the compiled static assets while keeping standard API routes functional:
+
+```python
+import os
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from app.api.api import api_router
+
+app = FastAPI(title="Unified Multi-Tenant Chatbot")
+
+# 1. Include your API routes
+app.include_router(api_router, prefix="/api/v1")
+
+# 2. Path to your compiled React frontend static files
+frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+
+if os.path.exists(frontend_dir):
+    # Mount the /assets or static directory containing JS and CSS files
+    assets_dir = os.path.join(frontend_dir, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+        
+    # Catch-all handler to serve index.html for SPA routing (React Router fallback)
+    @app.get("/{catchall:path}")
+    async def serve_react_app(catchall: str):
+        # Ignore API request prefixes to prevent overriding routing
+        if catchall.startswith("api/"):
+            return None
+        return FileResponse(os.path.join(frontend_dir, "index.html"))
+```
+
+#### 2. Create the Multi-Stage Dockerfile (`Dockerfile`)
+Creating a Docker container ensures that your React frontend compiles and your FastAPI backend runs in the exact same sandbox locally as it does in production on Render.
+
+Create a `Dockerfile` at the root of your project workspace:
+
+```dockerfile
+# Stage 1: Build React frontend
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Serve using FastAPI and Python
+FROM python:3.11-slim
+WORKDIR /app
+
+# Install system utilities
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy backend dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend source code
+COPY app/ ./app
+
+# Copy compiled React static assets from Stage 1 builder
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+
+# Expose FastAPI server port
+EXPOSE 8000
+
+# Set environment fallback defaults
+ENV PORT=8000
+
+# Start command
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
+```
+
+#### 3. Build & Run Locally with Docker (First Step)
+Before pushing to production, you can test the entire unified application locally on your machine using Docker:
+
+1. **Build the Docker Image:**
+   ```bash
+   docker build -t unified-chatbot .
+   ```
+2. **Run the Container (Mounting local `.env` variables):**
+   ```bash
+   docker run -d \
+     -p 8000:8000 \
+     --env-file .env \
+     --name chatbot-container \
+     unified-chatbot
+   ```
+3. **Verify Deployment:**
+   Open `http://localhost:8000` in your web browser. The entire application (React UI talking directly to FastAPI API routes on the same port) will be running.
+
+#### 4. Deploying to Render via Docker (Second Step)
+Once you verify that your local Docker container works, deploying to Render is incredibly simple and robust since Render supports building and running Dockerfiles natively:
+
+1. **Create a New Web Service on Render:**
+   * Link your GitHub repository.
+2. **Configure Service Parameters:**
+   * **Service Type:** Web Service
+   * **Runtime / Language:** **Docker** (Render will automatically detect your root-level `Dockerfile` and compile it).
+   * **Branch:** `main` or your active git branch.
+3. **Set Environment Variables in the Render Dashboard:**
+   * `GEMINI_API_KEY`: *(Your Google AI Studio API key)*
+   * `MONGODB_URI`: *(Your persistent MongoDB Atlas URI)*
+   * `QDRANT_HOST`: *(Your Qdrant Cloud Cluster endpoint)*
+   * `QDRANT_API_KEY`: *(Your secure Qdrant Cloud API key)*
+4. **Deploy:**
+   Click **Deploy Web Service**. Render will spin up a secure Docker build environment, run the multi-stage build, and host the final container under a free HTTPS endpoint!
+
+
+---
+
+💡 **Next Steps:** When you are ready, I can assist you with applying these edits directly to your codebase files (`app/core/config.py`, `app/services/vector_store.py`, adding `rag_service.py`, creating `documents.py`, and updating the LangGraph flow) to make this fully functional and ready for deployment.

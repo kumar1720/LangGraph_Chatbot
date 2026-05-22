@@ -1,0 +1,33 @@
+# Core dependencies
+fastapi==0.115.12
+uvicorn==0.34.2
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.18
+pydantic==2.11.5
+pydantic-settings==2.9.1
+python-dotenv==1.1.0
+
+# Database & Storage
+motor==3.3.2
+pypdf==4.2.0
+
+# LLM, Vector Store & Agent Orchestration
+langchain-qdrant==0.2.0
+langgraph==0.3.2
+langchain-core>=0.3.65
+langchain-google-genai==2.0.9
+langchain-community>=0.3.0
+
+# MCP (Model Context Protocol)
+fastmcp==2.3.0
+langsmith>=0.1.147
+langchain-mcp-adapters==0.1.7
+
+# Context & Session Memory
+mem0ai==0.1.107
+
+# Free-Tier Scraping and Search
+duckduckgo-search==8.1.1
+beautifulsoup4==4.14.3

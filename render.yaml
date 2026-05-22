@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: unified-chatbot-mcp
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    numInstances: 1
+    healthCheckPath: /api/v1/history/chats
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 10080
+      - key: MONGODB_URI
+        sync: true
+      - key: GEMINI_API_KEY
+        sync: true
+      - key: QDRANT_HOST
+        sync: true
+      - key: QDRANT_PORT
+        value: 6333
+      - key: QDRANT_API_KEY
+        sync: true
+      - key: LANGCHAIN_TRACING_V2
+        value: "true"
+      - key: LANGSMITH_ENDPOINT
+        value: "https://api.smith.langchain.com"
+      - key: LANGSMITH_API_KEY
+        sync: true
+      - key: LANGSMITH_PROJECT
+        value: "LangGraph_Chatbot_tracing"
