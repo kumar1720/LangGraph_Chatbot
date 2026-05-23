@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { useVoiceAssistant } from '../hooks/useVoiceAssistant';
 import streamingService from '../services/streamingService';
+import MessageBubble from './MessageBubble';
 
 const VoiceAssistant = () => {
   const navigate = useNavigate();
@@ -141,10 +142,6 @@ const VoiceAssistant = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const formatTime = (timestamp) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
 
   const renderMessage = (message) => {
     if (message.isSystem) {
@@ -155,8 +152,8 @@ const VoiceAssistant = () => {
             textAlign: 'center', 
             py: 1.5, 
             my: 2,
-            borderTop: '1px dashed rgba(0, 0, 0, 0.1)',
-            borderBottom: '1px dashed rgba(0, 0, 0, 0.1)'
+            borderTop: '1px dashed rgba(255, 255, 255, 0.1)',
+            borderBottom: '1px dashed rgba(255, 255, 255, 0.1)'
           }}
         >
           <Box component="div" sx={{ 
@@ -171,48 +168,11 @@ const VoiceAssistant = () => {
     }
 
     return (
-      <Box 
-        key={message.id} 
-        sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: message.isUser ? 'flex-end' : 'flex-start',
-          mb: 2.5,
-          maxWidth: '85%',
-          alignSelf: message.isUser ? 'flex-end' : 'flex-start',
-        }}
-      >
-        <Box sx={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          mb: 0.5,
-          ml: message.isUser ? 0 : 1,
-          mr: message.isUser ? 1 : 0
-        }}>
-          <Typography variant="caption" sx={{ fontWeight: 'medium', color: 'text.secondary' }}>
-            {message.isUser ? 'You' : 'Assistant'}
-          </Typography>
-          <Typography variant="caption" sx={{ ml: 1, opacity: 0.8, color: 'text.secondary' }}>
-            {formatTime(message.timestamp)}
-          </Typography>
-        </Box>
-        <Paper 
-          elevation={message.isUser ? 1 : 2} 
-          sx={{
-            p: 2,
-            width: 'fit-content',
-            maxWidth: '100%',
-            bgcolor: message.isUser ? 'grey.100' : 'primary.light',
-            color: message.isUser ? 'text.primary' : 'primary.contrastText',
-            borderRadius: message.isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-            lineHeight: 1.5
-          }}
-        >
-          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {message.text}
-          </Typography>
-        </Paper>
-      </Box>
+      <MessageBubble
+        key={message.id}
+        content={message.text}
+        role={message.isUser ? 'user' : 'assistant'}
+      />
     );
   };
 
@@ -280,34 +240,11 @@ const VoiceAssistant = () => {
             )}
 
             {currentResponse && (
-              <Box 
-                sx={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  mb: 2.5,
-                  maxWidth: '85%',
-                  alignSelf: 'flex-start',
-                }}
-              >
-                <Typography variant="caption" sx={{ fontWeight: 'medium', color: 'text.secondary', mb: 0.5, ml: 1 }}>
-                  Assistant (Speaking...)
-                </Typography>
-                <Paper 
-                  elevation={2} 
-                  sx={{
-                    p: 2,
-                    bgcolor: 'primary.light',
-                    color: 'primary.contrastText',
-                    borderRadius: '16px 16px 16px 4px',
-                    lineHeight: 1.5
-                  }}
-                >
-                  <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {currentResponse}...
-                  </Typography>
-                </Paper>
-              </Box>
+              <MessageBubble
+                content={currentResponse}
+                role="assistant"
+                isStreaming={true}
+              />
             )}
 
             <div ref={messagesEndRef} />
