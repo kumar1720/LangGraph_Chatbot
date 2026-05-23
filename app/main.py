@@ -17,6 +17,57 @@ from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
+# Monkey patch Mem0's GeminiLLM class to prevent crashing on empty tools in production Docker container
+try:
+    import google.generativeai as genai
+    from google.generativeai.types import content_types
+    from mem0.llms.gemini import GeminiLLM
+    
+    def patched_generate_response(
+        self,
+        messages: list,
+        response_format=None,
+        tools=None,
+        tool_choice: str = "auto",
+    ):
+        params = {
+            "temperature": self.config.temperature,
+            "max_output_tokens": self.config.max_tokens,
+            "top_p": self.config.top_p,
+        }
+
+        if response_format is not None and response_format["type"] == "json_object":
+            params["response_mime_type"] = "application/json"
+            if "schema" in response_format:
+                params["response_schema"] = response_format["schema"]
+                
+        tool_config = None
+        if tools and tool_choice:
+            tool_config = content_types.to_tool_config(
+                {
+                    "function_calling_config": {
+                        "mode": tool_choice,
+                        "allowed_function_names": (
+                            [tool["function"]["name"] for tool in tools] if tool_choice == "any" else None
+                        ),
+                    }
+                }
+            )
+
+        response = self.client.generate_content(
+            contents=self._reformat_messages(messages),
+            tools=self._reformat_tools(tools),
+            generation_config=genai.GenerationConfig(**params),
+            tool_config=tool_config,
+        )
+
+        return self._parse_response(response, tools)
+
+    GeminiLLM.generate_response = patched_generate_response
+    logger.info("Successfully monkey-patched mem0.llms.gemini.GeminiLLM.generate_response to handle empty tools in production container")
+except Exception as patch_err:
+    logger.warning(f"Could not apply monkey-patch to Mem0 Gemini LLM class: {patch_err}")
+
 load_dotenv()
 
 @asynccontextmanager
