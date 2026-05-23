@@ -141,7 +141,11 @@ class AISupport:
         """
         logger.info("Self ID: {}".format(id(self)))
 
-        memories = await self.__search_memory(question, user_id=user_id)
+        try:
+            memories = await self.__search_memory(question, user_id=user_id)
+        except Exception as mem_err:
+            logger.warning(f"Failed to search memories: {mem_err}")
+            memories = {'results': []}
 
         relevant_docs = self.__vector_store.get_chat_by_id(
             chat_id=chat_id, 
@@ -209,32 +213,46 @@ class AISupport:
             HumanMessage(content=question)
         ]
 
-        initial_state = create_initial_state(messages, max_iterations=1)
-        response_state = await self.__graph.ainvoke(initial_state, config=config)
-
         response_content = ""
-        if "direct_response" in response_state:
-            response_content = response_state["direct_response"]
-            logger.info("Using direct response from supervisor")
-        elif "messages" in response_state and response_state["messages"]:
-            for msg in reversed(response_state["messages"]):
-                if isinstance(msg, AIMessage) and hasattr(msg, "name") and msg.name in ["Researcher", "Scrapper", "Supervisor"]:
-                    response_content = msg.content
-                    logger.info(f"Using agent response from {msg.name}")
-                    break
+        try:
+            initial_state = create_initial_state(messages, max_iterations=1)
+            response_state = await self.__graph.ainvoke(initial_state, config=config)
 
-        await self.__add_memory(question, response_content, user_id=user_id)
+            if "direct_response" in response_state:
+                response_content = response_state["direct_response"]
+                logger.info("Using direct response from supervisor")
+            elif "messages" in response_state and response_state["messages"]:
+                for msg in reversed(response_state["messages"]):
+                    if isinstance(msg, AIMessage) and hasattr(msg, "name") and msg.name in ["Researcher", "Scrapper", "Supervisor"]:
+                        response_content = msg.content
+                        logger.info(f"Using agent response from {msg.name}")
+                        break
+        except Exception as graph_err:
+            logger.error(f"LangGraph execution failed: {str(graph_err)}")
+            if "ResourceExhausted" in str(graph_err) or "429" in str(graph_err) or "quota" in str(graph_err).lower():
+                response_content = "⚠️ **Gemini API Quota Exceeded:** You have exceeded your free tier rate limit of 20 requests per day for the Gemini model. Please wait for your daily limit to reset, or configure a billing plan / updated API key."
+            else:
+                response_content = f"I encountered an error while processing your request: {str(graph_err)}"
 
-        self.__vector_store.store_conversation(
-            question=question,
-            answer=response_content,
-            tenant_id=tenant_id,
-            metadata={
-                "user_id": user_id,
-                "chat_id": chat_id,
-                "timestamp": str(datetime.now())
-            }
-        )
+        try:
+            if response_content and not response_content.startswith("⚠️"):
+                await self.__add_memory(question, response_content, user_id=user_id)
+        except Exception as mem_err:
+            logger.warning(f"Failed to add memory: {mem_err}")
+
+        try:
+            self.__vector_store.store_conversation(
+                question=question,
+                answer=response_content,
+                tenant_id=tenant_id,
+                metadata={
+                    "user_id": user_id,
+                    "chat_id": chat_id,
+                    "timestamp": str(datetime.now())
+                }
+            )
+        except Exception as store_err:
+            logger.warning(f"Failed to store conversation: {store_err}")
 
         return {"messages": [response_content]}
 
