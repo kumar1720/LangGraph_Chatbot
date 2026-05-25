@@ -10,7 +10,7 @@ from app.agent.chat_agent import AISupport
 from app.models.user import User
 from app.schemas.api import LLMRequest
 from app.utils.logger import setup_logger
-from app.utils.openai_mapper import create_streaming_openai_chunk
+from app.utils.mapper import create_streaming_chunk
 
 logger = setup_logger(__name__)
 
@@ -33,7 +33,7 @@ class StreamingService:
     async def streaming_chat(self, request: LLMRequest, current_user: User) -> StreamingResponse:
         try:
             async def generate_stream() -> AsyncGenerator[str, None]:
-                first_chunk = await create_streaming_openai_chunk(role="assistant")
+                first_chunk = await create_streaming_chunk(role="assistant")
                 yield f"data: {json.dumps(first_chunk)}\n\n"
 
                 response = await self.support_agent.ask(
@@ -50,10 +50,10 @@ class StreamingService:
                     
                     for i in range(0, len(full_content), chunk_size):
                         content_chunk = full_content[i:i+chunk_size]
-                        chunk_data = await create_streaming_openai_chunk(content=content_chunk)
+                        chunk_data = await create_streaming_chunk(content=content_chunk)
                         yield f"data: {json.dumps(chunk_data)}\n\n"
 
-                final_chunk = await create_streaming_openai_chunk(finish_reason="stop")
+                final_chunk = await create_streaming_chunk(finish_reason="stop")
                 yield f"data: {json.dumps(final_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
 

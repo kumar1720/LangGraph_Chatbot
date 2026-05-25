@@ -4,7 +4,7 @@ import uuid
 from typing import Dict, Any, Optional
 
 
-async def create_streaming_openai_chunk(
+async def create_streaming_chunk(
         content: Optional[str] = None,
         role: Optional[str] = None,
         finish_reason: Optional[str] = None,
