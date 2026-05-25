@@ -54,6 +54,37 @@ const chatService = {
       console.error('Error sending message:', error);
       throw error;
     }
+  },
+
+  /**
+   * Delete a chat session by ID
+   * @param {string} chatId - The chat ID to delete
+   * @returns {Promise<Object>} The response data
+   */
+  deleteChat: async (chatId) => {
+    try {
+      const response = await axios.delete(`/api/v1/history/chats/${chatId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error deleting chat ${chatId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * Rename a chat session by ID
+   * @param {string} chatId - The chat ID to rename
+   * @param {string} title - The new title for the chat
+   * @returns {Promise<Object>} The response data
+   */
+  renameChat: async (chatId, title) => {
+    try {
+      const response = await axios.put(`/api/v1/history/chats/${chatId}`, { title });
+      return response.data;
+    } catch (error) {
+      console.error(`Error renaming chat ${chatId}:`, error);
+      throw error;
+    }
   }
 };
 

@@ -251,6 +251,16 @@ class AISupport:
                     "timestamp": str(datetime.now())
                 }
             )
+            # Invalidate Redis chat history cache
+            from app.core.redis import redis_client
+            if redis_client:
+                try:
+                    keys = redis_client.keys(f"chats:{user_id}:*")
+                    if keys:
+                        redis_client.delete(*keys)
+                        logger.info(f"Invalidated {len(keys)} Redis cache keys for user {user_id} on new message")
+                except Exception as e:
+                    logger.warning(f"Failed to invalidate Redis cache for user {user_id} on new message: {e}")
         except Exception as store_err:
             logger.warning(f"Failed to store conversation: {store_err}")
 

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     LANGSMITH_API_KEY: str = "********"
     LANGSMITH_PROJECT: str = "pr-only-surround-27"
 
+    # Upstash Redis
+    REDIS_URL: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

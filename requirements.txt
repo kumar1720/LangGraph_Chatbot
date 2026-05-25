@@ -31,3 +31,6 @@ mem0ai==0.1.107
 # Free-Tier Scraping and Search
 duckduckgo-search==8.1.1
 beautifulsoup4==4.14.3
+
+# Caching
+redis>=5.0.0

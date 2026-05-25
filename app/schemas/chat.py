@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ class ChatMessage(BaseModel):
     timestamp: str
     chat_id: str
     user_id: str
+    title: Optional[str] = None
 
 
 class ChatHistoryResponse(BaseModel):

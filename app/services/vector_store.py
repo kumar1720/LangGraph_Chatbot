@@ -194,3 +194,63 @@ class MultiTenantVectorStore:
         results = format_chat_results(response[0])
         results.sort(key=lambda x: x.get("timestamp", ""))
         return results
+
+    def delete_chat(self, chat_id: str, tenant_id: str, user_id: str) -> None:
+        """Delete all messages for a specific chat ID belonging to a user"""
+        self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="metadata.tenant_id",
+                            match=models.MatchValue(value=tenant_id)
+                        ),
+                        models.FieldCondition(
+                            key="metadata.user_id",
+                            match=models.MatchValue(value=str(user_id))
+                        ),
+                        models.FieldCondition(
+                            key="metadata.chat_id",
+                            match=models.MatchValue(value=chat_id)
+                        )
+                    ]
+                )
+            )
+        )
+
+    def rename_chat(self, chat_id: str, title: str, tenant_id: str, user_id: str) -> None:
+        """Rename a specific chat by updating the title inside metadata for all points in it"""
+        response = self.client.scroll(
+            collection_name=self.collection_name,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="metadata.tenant_id",
+                        match=models.MatchValue(value=tenant_id)
+                    ),
+                    models.FieldCondition(
+                        key="metadata.user_id",
+                        match=models.MatchValue(value=str(user_id))
+                    ),
+                    models.FieldCondition(
+                        key="metadata.chat_id",
+                        match=models.MatchValue(value=chat_id)
+                    )
+                ]
+            ),
+            limit=500,
+            with_payload=True,
+            with_vectors=False
+        )
+        
+        points = response[0]
+        for point in points:
+            new_metadata = point.payload.get("metadata", {}).copy()
+            new_metadata["title"] = title
+            self.client.set_payload(
+                collection_name=self.collection_name,
+                payload={"metadata": new_metadata},
+                points=[point.id]
+            )
+

@@ -17,12 +17,17 @@ import {
   useMediaQuery,
   useTheme,
   LinearProgress,
+  TextField,
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import AddIcon from '@mui/icons-material/Add';
 import LogoutIcon from '@mui/icons-material/Logout';
 import MicIcon from '@mui/icons-material/Mic';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CheckIcon from '@mui/icons-material/Check';
+import ClearIcon from '@mui/icons-material/Clear';
 import { useAuth } from '../contexts/AuthContext';
 import chatService from '../services/chatService';
 import streamingService from '../services/streamingService';
@@ -46,6 +51,8 @@ const Chat = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
+  const [editingChatId, setEditingChatId] = useState(null);
+  const [editTitleText, setEditTitleText] = useState('');
 
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -132,7 +139,9 @@ const Chat = () => {
         
         return {
           id: chatId,
-          title: latestMessage.user_message.substring(0, 30) + (latestMessage.user_message.length > 30 ? '...' : ''),
+          title: (latestMessage.title && latestMessage.title.trim())
+            ? latestMessage.title
+            : latestMessage.user_message.substring(0, 30) + (latestMessage.user_message.length > 30 ? '...' : ''),
           timestamp: latestMessage.timestamp,
           messages: sortedMessages
         };
@@ -340,6 +349,66 @@ const Chat = () => {
     navigate('/login');
   };
 
+  /**
+   * Start the renaming process for a chat
+   */
+  const handleStartRename = (chatId, currentTitle) => {
+    setEditingChatId(chatId);
+    setEditTitleText(currentTitle);
+  };
+
+  /**
+   * Save the renamed chat title
+   */
+  const handleSaveRename = async (chatId) => {
+    if (!editTitleText.trim()) return;
+    try {
+      await chatService.renameChat(chatId, editTitleText.trim());
+      setEditingChatId(null);
+      // Update chats list in local state
+      setChats(prev => prev.map(chat => {
+        if (chat.id === chatId) {
+          return { ...chat, title: editTitleText.trim() };
+        }
+        return chat;
+      }));
+      // Update current chat title if it's the active one
+      if (currentChat?.id === chatId) {
+        setCurrentChat(prev => ({ ...prev, title: editTitleText.trim() }));
+      }
+    } catch (err) {
+      console.error('Failed to rename chat:', err);
+      setError('Failed to rename chat. Please try again.');
+    }
+  };
+
+  /**
+   * Delete a chat history thread
+   */
+  const handleDeleteChat = async (chatId) => {
+    const confirmDelete = window.confirm('Are you sure you want to delete this chat thread? This action cannot be undone.');
+    if (!confirmDelete) return;
+
+    try {
+      await chatService.deleteChat(chatId);
+      
+      const updatedChats = chats.filter(chat => chat.id !== chatId);
+      setChats(updatedChats);
+
+      if (currentChat?.id === chatId) {
+        if (updatedChats.length > 0) {
+          handleSelectChat(updatedChats[0].id);
+        } else {
+          setCurrentChat(null);
+          setMessages([]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete chat:', err);
+      setError('Failed to delete chat. Please try again.');
+    }
+  };
+
   return (
     <Box sx={{ display: 'flex', height: '100vh' }}>
       {/* App Bar */}
@@ -419,16 +488,77 @@ const Chat = () => {
               </ListItem>
             ) : (
               chats.map((chat) => (
-                <ListItem key={chat.id} disablePadding>
-                  <ListItemButton
-                    selected={currentChat?.id === chat.id}
-                    onClick={() => handleSelectChat(chat.id)}
-                  >
-                    <ListItemText
-                      primary={chat.title}
-                      secondary={new Date(chat.timestamp).toLocaleString()}
-                    />
-                  </ListItemButton>
+                <ListItem
+                  key={chat.id}
+                  disablePadding
+                  secondaryAction={
+                    editingChatId !== chat.id && (
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <IconButton
+                          edge="end"
+                          aria-label="edit"
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartRename(chat.id, chat.title);
+                          }}
+                          sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          edge="end"
+                          aria-label="delete"
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteChat(chat.id);
+                          }}
+                          sx={{ color: 'text.secondary', '&:hover': { color: 'error.main' } }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    )
+                  }
+                >
+                  {editingChatId === chat.id ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', px: 2, py: 1 }}>
+                      <TextField
+                        size="small"
+                        value={editTitleText}
+                        onChange={(e) => setEditTitleText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveRename(chat.id);
+                          if (e.key === 'Escape') setEditingChatId(null);
+                        }}
+                        autoFocus
+                        fullWidth
+                        sx={{ mr: 1 }}
+                      />
+                      <IconButton size="small" color="primary" onClick={() => handleSaveRename(chat.id)}>
+                        <CheckIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton size="small" color="error" onClick={() => setEditingChatId(null)}>
+                        <ClearIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  ) : (
+                    <ListItemButton
+                      selected={currentChat?.id === chat.id}
+                      onClick={() => handleSelectChat(chat.id)}
+                      sx={{ pr: 9 }}
+                    >
+                      <ListItemText
+                        primary={chat.title}
+                        secondary={new Date(chat.timestamp).toLocaleString()}
+                        primaryTypographyProps={{
+                          noWrap: true,
+                          sx: { pr: 1 }
+                        }}
+                      />
+                    </ListItemButton>
+                  )}
                 </ListItem>
               ))
             )}
